@@ -11,17 +11,13 @@ import (
 
 const dateFormat = "20060102150405"
 
-type BreakServer struct {
+var failedServers []*FailedServer
+
+type FailedServer struct {
 	ServerName   string
 	BreakTime    time.Time
 	RecoveryTime time.Time
-	BreakCount   int32
 	IsBreak      bool
-}
-
-type Result struct {
-	BreakHost string
-	BreakSpan time.Duration
 }
 
 func main() {
@@ -29,11 +25,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer f.Close()
 
+	/* CSVリーダー生成 */
 	r := csv.NewReader(f)
-
-	var bs []*BreakServer
-	// var res []Result
 
 	for {
 		record, err := r.Read()
@@ -44,48 +39,34 @@ func main() {
 			log.Fatal(err)
 		}
 
+		confirmTime, _ := time.Parse(dateFormat, record[0])
+		serverName := record[1]
+		responseResult := record[2]
+
 		/* 故障サーバを抽出・格納 */
-		breakHost := record[1]
-		if record[2] == "-" {
-			for _, s := range bs {
-				if s.ServerName == breakHost && s.IsBreak {
-					s.BreakCount += 1
+		if responseResult == "-" {
+			for _, s := range failedServers {
+				if s.ServerName == serverName && s.IsBreak {
+					continue
 				}
 			}
-			bs = append(bs, &BreakServer{
-				ServerName: record[1],
-				BreakTime:  stringToTime(record[0]),
+			failedServers = append(failedServers, &FailedServer{
+				ServerName: serverName,
+				BreakTime:  confirmTime,
 				IsBreak:    true,
-				BreakCount: 1,
 			})
 		} else {
-			for _, a := range bs {
-				if a.ServerName == breakHost && a.IsBreak {
-					a.RecoveryTime = stringToTime(record[0])
+			for _, s := range failedServers {
+				if s.ServerName == serverName && s.IsBreak {
+					s.RecoveryTime = confirmTime
 				}
 			}
 		}
-		// fmt.Printf("%#v\n", record)
 	}
 
-	/* 故障サーバ名、故障期間を抽出 */
-	for _, s := range bs {
-		if s.RecoveryTime.IsZero() {
-			continue
-		}
-		bt := s.RecoveryTime.Sub(s.BreakTime)
-		fmt.Println("故障サーバー:", s.ServerName, "故障期間: ", bt)
-		// res = append(res, Result{
-		// 	BreakHost: s.ServerName,
-		// 	BreakSpan: bt,
-		// })
+	/* 復旧したサーバの故障サーバ名、故障期間を抽出 */
+	for _, s := range failedServers {
+		failurePeriod := s.RecoveryTime.Sub(s.BreakTime)
+		fmt.Printf("故障サーバーIP: %s 故障期間: %s\n", s.ServerName, failurePeriod)
 	}
-
-	// fmt.Println(res)
-}
-
-/* 文字列をTime型に変換する */
-func stringToTime(str string) time.Time {
-	t, _ := time.Parse(dateFormat, str)
-	return t
 }
